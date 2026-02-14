@@ -20,6 +20,9 @@
 
 /* This file is available under an ISC license. */
 
+/* Prevent empty translation unit warning */
+typedef int osdep_c_dummy_t;
+
 #ifdef _WIN32
 #define _CRT_SECURE_NO_WARNINGS
 

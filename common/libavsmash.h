@@ -24,7 +24,7 @@ typedef struct
 {
     int                 width;      /* the maximum visual presentation width */
     int                 height;     /* the maximum visual presentation height */
-    uint64_t            channel_layout;
+    AVChannelLayout     ch_layout;  /* FFmpeg 8+ channel layout struct */
     enum AVSampleFormat sample_format;
     int                 sample_rate;
     int                 bits_per_sample;
@@ -93,12 +93,10 @@ int get_summaries
     codec_configuration_t *config
 );
 
-int libavsmash_find_and_open_decoder
-(
+int libavsmash_find_and_open_decoder(
     codec_configuration_t   *config,
     const AVCodecParameters *codecpar,
-    const int                thread_count,
-    const int                refcounted_frames
+    const int                thread_count
 );
 
 int initialize_decoder_configuration

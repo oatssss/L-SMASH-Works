@@ -34,22 +34,18 @@ const AVCodec *find_decoder
     const char    **preferred_decoder_names
 );
 
-int open_decoder
-(
+int open_decoder(
     AVCodecContext         **ctx,
     const AVCodecParameters *codecpar,
     const AVCodec           *codec,
-    const int                thread_count,
-    const int                refcounted_frames
+    const int                thread_count
 );
 
-int find_and_open_decoder
-(
+int find_and_open_decoder(
     AVCodecContext         **ctx,
     const AVCodecParameters *codecpar,
     const char             **preferred_decoder_names,
-    const int                thread_count,
-    const int                refcounted_frames
+    const int                thread_count
 );
 
 int decode_video_packet

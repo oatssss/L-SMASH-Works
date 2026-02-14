@@ -21,6 +21,7 @@
 /* This file is available under an ISC license. */
 
 #include <string.h>
+#include <libavutil/channel_layout.h>
 
 typedef struct
 {
@@ -38,8 +39,13 @@ static inline void put_silence_audio_samples( int silence_data_size, int is_u8, 
 
 static inline int get_channel_layout_nb_channels( uint64_t channel_layout )
 {
-    int channels = av_get_channel_layout_nb_channels( channel_layout );
-    return channels > 0 ? channels : 1;
+    AVChannelLayout layout;
+    if (av_channel_layout_from_mask(&layout, channel_layout) == 0) {
+        int channels = layout.nb_channels;
+        av_channel_layout_uninit(&layout);
+        return channels > 0 ? channels : 1;
+    }
+    return 1;
 }
 
 static inline int get_linesize( int channel_count, int sample_count, enum AVSampleFormat sample_format )
@@ -50,9 +56,9 @@ static inline int get_linesize( int channel_count, int sample_count, enum AVSamp
 }
 
 int resample_s32_to_s24( uint8_t **out_data, uint8_t *in_data, int data_size );
-int flush_resampler_buffers( AVAudioResampleContext *avr );
-int update_resampler_configuration( AVAudioResampleContext *avr,
+int flush_resampler_buffers( SwrContext *swr );
+int update_resampler_configuration( SwrContext *swr,
                                     uint64_t out_channel_layout, int out_sample_rate, enum AVSampleFormat out_sample_fmt,
                                     uint64_t  in_channel_layout, int  in_sample_rate, enum AVSampleFormat  in_sample_fmt,
                                     int *input_planes, int *input_block_align );
-int resample_audio( AVAudioResampleContext *avr, audio_samples_t *out, audio_samples_t *in );
+int resample_audio( SwrContext *swr, audio_samples_t *out, audio_samples_t *in );

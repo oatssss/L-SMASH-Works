@@ -38,11 +38,11 @@ const AVCodec *find_decoder
     const char    **preferred_decoder_names
 )
 {
-    AVCodec *codec = avcodec_find_decoder( codec_id );
+    const AVCodec *codec = avcodec_find_decoder( codec_id );
     if( codec && preferred_decoder_names )
         for( const char **decoder_name = preferred_decoder_names; *decoder_name != NULL; decoder_name++ )
         {
-            AVCodec *preferred_decoder = avcodec_find_decoder_by_name( *decoder_name );
+            const AVCodec *preferred_decoder = avcodec_find_decoder_by_name( *decoder_name );
             if( preferred_decoder
              && preferred_decoder->id == codec->id )
             {
@@ -58,8 +58,7 @@ int open_decoder
     AVCodecContext         **ctx,
     const AVCodecParameters *codecpar,
     const AVCodec           *codec,
-    const int                thread_count,
-    const int                refcounted_frames
+    const int                thread_count
 )
 {
     AVCodecContext *c = avcodec_alloc_context3( codec );
@@ -79,7 +78,6 @@ int open_decoder
     if( is_qsv_decoder( c->codec ) )
         if( (ret = do_qsv_decoder_workaround( c )) < 0 )
             goto fail;
-    c->refcounted_frames = refcounted_frames;
     *ctx = c;
     return ret;
 fail:
@@ -92,14 +90,13 @@ int find_and_open_decoder
     AVCodecContext         **ctx,
     const AVCodecParameters *codecpar,
     const char             **preferred_decoder_names,
-    const int                thread_count,
-    const int                refcounted_frames
+    const int                thread_count
 )
 {
     const AVCodec *codec = find_decoder( codecpar->codec_id, preferred_decoder_names );
     if( !codec )
         return -1;
-    return open_decoder( ctx, codecpar, codec, thread_count, refcounted_frames );
+    return open_decoder( ctx, codecpar, codec, thread_count );
 }
 
 /* An incomplete simulator of the old libavcodec video decoder API

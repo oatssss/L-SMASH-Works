@@ -126,13 +126,11 @@ static inline int read_av_frame
     } while( 1 );
 }
 
-int find_and_open_decoder
-(
+int find_and_open_decoder(
     AVCodecContext         **ctx,
     const AVCodecParameters *codecpar,
     const char             **preferred_decoder_names,
-    const int                thread_count,
-    const int                refcounted_frames
+    const int                thread_count
 );
 
 void lwlibav_flush_buffers

@@ -28,7 +28,7 @@ extern "C"
 #endif  /* __cplusplus */
 #include <libavformat/avformat.h>       /* Demuxer */
 #include <libavcodec/avcodec.h>         /* Decoder */
-#include <libavresample/avresample.h>   /* Resampler/Buffer */
+#include <libswresample/swresample.h>   /* Resampler/Buffer */
 #include <libavutil/mem.h>
 #include <libavutil/opt.h>
 #ifdef __cplusplus
@@ -202,7 +202,7 @@ int lwlibav_audio_get_desired_track
      || adhp->frame_count == 0
      || lavf_open_file( &adhp->format, file_path, &adhp->lh ) < 0
      || find_and_open_decoder( &ctx, adhp->format->streams[ adhp->stream_index ]->codecpar,
-                               adhp->preferred_decoder_names, threads, 0 ) < 0 )
+                        adhp->preferred_decoder_names, threads ) < 0 )
     {
         av_freep( &adhp->index_entries );
         lw_freep( &adhp->frame_list );
@@ -546,7 +546,7 @@ uint64_t lwlibav_audio_get_pcm_samples
 retry_seek:
         av_packet_unref( pkt );
         /* Flush audio resampler buffers. */
-        if( flush_resampler_buffers( aohp->avr_ctx ) < 0 )
+        if( flush_resampler_buffers( aohp->swr_ctx ) < 0 )
         {
             adhp->error = 1;
             lw_log_show( &adhp->lh, LW_LOG_FATAL,
@@ -585,7 +585,7 @@ retry_seek:
             if( adhp->exh.delay_count || !(output_flags & AUDIO_OUTPUT_ENOUGH) )
             {
                 /* Null packet */
-                av_init_packet( pkt );
+                av_packet_unref( pkt );
                 make_null_packet( pkt );
                 *alter_pkt = *pkt;
                 if( adhp->exh.delay_count )
@@ -649,11 +649,10 @@ void set_audio_basic_settings
     AVCodecParameters   *codecpar = adhp->format->streams[ adhp->stream_index ]->codecpar;
     lwlibav_extradata_t *entry    = &adhp->exh.entries[ adhp->frame_list[frame_number].extradata_index ];
     codecpar->sample_rate           = entry->sample_rate;
-    codecpar->channel_layout        = entry->channel_layout;
     codecpar->format                = (int)entry->sample_format;
     codecpar->bits_per_coded_sample = entry->bits_per_sample;
     codecpar->block_align           = entry->block_align;
-    codecpar->channels              = av_get_channel_layout_nb_channels( codecpar->channel_layout );
+    av_channel_layout_from_mask(&codecpar->ch_layout, entry->channel_layout);
 }
 
 int try_decode_audio_frame
@@ -696,7 +695,7 @@ int try_decode_audio_frame
             {
                 if( ctx->sample_rate == 0 )
                     strcpy( error_string, "Failed to set up sample rate.\n" );
-                else if( ctx->channel_layout == 0 && ctx->channels == 0 )
+                else if( ctx->ch_layout.nb_channels == 0 )
                     strcpy( error_string, "Failed to set up channels.\n" );
                 else
                     strcpy( error_string, "Failed to set up sample format.\n" );
@@ -709,9 +708,8 @@ int try_decode_audio_frame
         no_output_audio_decoding( ctx, alter_pkt, picture );
         ++frame_number;
     } while( ctx->sample_rate == 0
-          || ctx->sample_fmt == AV_SAMPLE_FMT_NONE
-          || (ctx->channels == 0 && ctx->channel_layout == 0)
-          || (ctx->channels != av_get_channel_layout_nb_channels( ctx->channel_layout )) );
+        || ctx->sample_fmt == AV_SAMPLE_FMT_NONE
+        || ctx->ch_layout.nb_channels == 0 );
 abort:
     av_frame_free( &picture );
     return err;

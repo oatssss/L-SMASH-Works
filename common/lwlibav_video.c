@@ -269,8 +269,8 @@ int lwlibav_video_get_desired_track
     if( vdhp->stream_index < 0
      || vdhp->frame_count == 0
      || lavf_open_file( &vdhp->format, file_path, &vdhp->lh ) < 0
-     || find_and_open_decoder( &ctx, vdhp->format->streams[ vdhp->stream_index ]->codecpar,
-                               vdhp->preferred_decoder_names, threads, 1 ) < 0 )
+    || find_and_open_decoder( &ctx, vdhp->format->streams[ vdhp->stream_index ]->codecpar,
+                         vdhp->preferred_decoder_names, threads ) < 0 )
     {
         av_freep( &vdhp->index_entries );
         lw_freep( &vdhp->frame_list );
@@ -707,7 +707,7 @@ static inline int field_number_of_picture_in_frame
     uint32_t                        output_picture_number
 )
 {
-    if( frame->top_field_first )
+    if( frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST )
         return vdhp->frame_list[output_picture_number].field_info == LW_FIELD_INFO_TOP    ? 1
              : vdhp->frame_list[output_picture_number].field_info == LW_FIELD_INFO_BOTTOM ? 2
              :                                                                              0;
@@ -864,7 +864,7 @@ static int get_frame
                 }
             }
             AVPacket pkt = { 0 };
-            av_init_packet( &pkt );
+            av_packet_unref(&pkt);
             pkt.data = NULL;
             pkt.size = 0;
             av_frame_unref( frame );
@@ -1038,7 +1038,7 @@ static inline int copy_frame
         return -1;
     }
     /* Treat this frame as interlaced. */
-    dst->interlaced_frame = 1;
+    dst->flags |= AV_FRAME_FLAG_INTERLACED;
     return 0;
 }
 
@@ -1087,7 +1087,7 @@ static inline int copy_field
         }
     }
     /* Treat this frame as interlaced. */
-    dst->interlaced_frame = 1;
+    dst->flags |= AV_FRAME_FLAG_INTERLACED;
     return 0;
 }
 
@@ -1128,7 +1128,7 @@ static int lwlibav_repeat_control
             if( get_requested_picture( vdhp, vdhp->frame_buffer, first_field_number ) < 0 )
                 return -1;
             /* Treat this frame as interlaced. */
-            vdhp->frame_buffer->interlaced_frame = 1;
+            vdhp->frame_buffer->flags |= AV_FRAME_FLAG_INTERLACED;
             return 0;
         }
     }
@@ -1283,22 +1283,6 @@ static uint32_t lwlibav_vfr2cfr
     return frame_number;
 }
 
-/* The pixel formats described in the index may not match pixel formats supported by the active decoder.
- * This selects the best pixel format from supported pixel formats with best effort. */
-static void handle_decoder_pix_fmt
-(
-    AVCodecParameters *codecpar,
-    const AVCodec     *codec,
-    enum AVPixelFormat pix_fmt
-)
-{
-    assert( codecpar && codec );
-    if( codec->pix_fmts )
-        codecpar->format = (int)avcodec_find_best_pix_fmt_of_list( codec->pix_fmts, pix_fmt, 1, NULL );
-    else
-        codecpar->format = (int)pix_fmt;
-}
-
 static int get_video_frame
 (
     lwlibav_video_decode_handler_t *vdhp,
@@ -1364,10 +1348,8 @@ int lwlibav_video_find_first_valid_frame
     vdhp->movable_frame_buffer = av_frame_alloc();
     if( !vdhp->movable_frame_buffer )
         return -1;
-    const AVCodec       *codec    = vdhp->ctx->codec;
     AVCodecParameters   *codecpar = vdhp->format->streams[ vdhp->stream_index ]->codecpar;
-    handle_decoder_pix_fmt( codecpar, codec, (enum AVPixelFormat)codecpar->format );
-    vdhp->ctx->pix_fmt = (enum AVPixelFormat)codecpar->format;  /* Correct decoder pixel format. */
+    vdhp->ctx->pix_fmt = (enum AVPixelFormat)codecpar->format;  // Set preferred pixel format before opening the codec
     vdhp->last_ts_frame_number = vdhp->frame_count;
     vdhp->av_seek_flags = (vdhp->lw_seek_flags & SEEK_POS_BASED) ? AVSEEK_FLAG_BYTE
                         : vdhp->lw_seek_flags == 0               ? AVSEEK_FLAG_FRAME
@@ -1455,7 +1437,7 @@ void set_video_basic_settings
     codecpar->width                 = entry->width;
     codecpar->height                = entry->height;
     codecpar->bits_per_coded_sample = entry->bits_per_sample;
-    handle_decoder_pix_fmt( codecpar, codec, entry->pixel_format );
+    vdhp->ctx->pix_fmt = (enum AVPixelFormat)entry->pixel_format;
 }
 
 int try_decode_video_frame

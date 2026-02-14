@@ -21,10 +21,11 @@
 /* This file is available under an ISC license. */
 
 #include "cpp_compat.h"
+#include <libswresample/swresample.h>
 
 typedef struct
 {
-    AVAudioResampleContext *avr_ctx;
+    SwrContext             *swr_ctx;
     uint8_t                *resampled_buffer;
     int                     resampled_buffer_size;
     int                     input_planes;

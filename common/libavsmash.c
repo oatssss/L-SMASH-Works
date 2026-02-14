@@ -84,8 +84,6 @@ lsmash_root_t *libavsmash_open_file
         goto open_fail;
     }
     /* libavformat */
-    av_register_all();
-    avcodec_register_all();
     if( avformat_open_input( p_format_ctx, file_name, NULL, NULL ) )
     {
         strcpy( error_string, "Failed to avformat_open_input.\n" );
@@ -450,18 +448,16 @@ static const AVCodec *libavsmash_find_decoder
     return find_decoder( codec_id, config->preferred_decoder_names );
 }
 
-int libavsmash_find_and_open_decoder
-(
+int libavsmash_find_and_open_decoder(
     codec_configuration_t   *config,
     const AVCodecParameters *codecpar,
-    const int                thread_count,
-    const int                refcounted_frames
+    const int                thread_count
 )
 {
     const AVCodec *codec = libavsmash_find_decoder( config, codecpar->codec_id );
     if( !codec )
         return -1;
-    return open_decoder( &config->ctx, codecpar, codec, thread_count, refcounted_frames );
+    return open_decoder( &config->ctx, codecpar, codec, thread_count );
 }
 
 static lsmash_codec_specific_data_type get_codec_specific_data_type
@@ -733,7 +729,7 @@ int get_sample
             return 0;
         }
     }
-    av_init_packet( pkt );
+    av_packet_unref(pkt);
     if( config->update_pending || config->queue.delay_count )
     {
         /* Return NULL packet to flush data from the decoder until corresponding decoder configuration is activated. */
@@ -807,7 +803,7 @@ void libavsmash_flush_buffers
     AVCodecParameters *codecpar     = avcodec_parameters_alloc();
     if( !codecpar
      || avcodec_parameters_from_context( codecpar, config->ctx ) < 0
-     || open_decoder( &ctx, codecpar, codec, config->ctx->thread_count, config->ctx->refcounted_frames ) < 0 )
+     || open_decoder( &ctx, codecpar, codec, config->ctx->thread_count ) < 0 )
     {
         avcodec_flush_buffers( config->ctx );
         config->error = 1;
@@ -857,7 +853,6 @@ void update_configuration
     char               error_string[96]  = { 0 };
     void              *app_specific      = config->ctx->opaque;
     const int          thread_count      = config->ctx->thread_count;
-    const int          refcounted_frames = config->ctx->refcounted_frames;
     AVCodecParameters *codecpar          = avcodec_parameters_alloc();
     if( !codecpar || avcodec_parameters_from_context( codecpar, config->ctx ) < 0 )
     {
@@ -896,7 +891,15 @@ void update_configuration
             lsmash_audio_summary_t *audio = (lsmash_audio_summary_t *)summary;
             codecpar->sample_rate           = config->queue.sample_rate     ? config->queue.sample_rate     : audio->frequency;
             codecpar->bits_per_coded_sample = config->queue.bits_per_sample ? config->queue.bits_per_sample : audio->sample_size;
-            codecpar->channels              = config->queue.channels        ? config->queue.channels        : audio->channels;
+            // Prefer to set the channel layout using the number of channels if available, as this selects a standard layout (e.g., stereo, 5.1) expected by most decoders.
+            // If the channel count is not set, leave the layout uninitialized.
+            if (config->queue.channels > 0) {
+                av_channel_layout_default(&codecpar->ch_layout, config->queue.channels);
+            } else if (audio->channels > 0) {
+                av_channel_layout_default(&codecpar->ch_layout, audio->channels);
+            } else {
+                av_channel_layout_uninit(&codecpar->ch_layout);
+            }
         }
         if( codec->id == AV_CODEC_ID_DTS )
         {
@@ -914,7 +917,7 @@ void update_configuration
     /* Open an appropriate decoder.
      * Here, we force single threaded decoding since some decoder doesn't do its proper initialization with multi-threaded decoding. */
     AVCodecContext *ctx = NULL;
-    if( open_decoder( &ctx, codecpar, codec, 1, refcounted_frames ) < 0 )
+    if( open_decoder( &ctx, codecpar, codec, 1 ) < 0 )
     {
         strcpy( error_string, "Failed to open decoder.\n" );
         goto fail;
@@ -973,7 +976,7 @@ void update_configuration
             {
                 if( ctx->sample_rate == 0 )
                     strcpy( error_string, "Failed to set up sample rate.\n" );
-                else if( ctx->channel_layout == 0 && ctx->channels == 0 )
+                else if( ctx->ch_layout.nb_channels == 0 )
                     strcpy( error_string, "Failed to set up channels.\n" );
                 else
                     strcpy( error_string, "Failed to set up sample format.\n" );
@@ -982,8 +985,8 @@ void update_configuration
             }
             int dummy;
             decode_audio_packet( ctx, picture, &dummy, &pkt );
-        } while( ctx->sample_rate == 0 || (ctx->channel_layout == 0 && ctx->channels == 0) || ctx->sample_fmt == AV_SAMPLE_FMT_NONE );
-        extended->channel_layout = ctx->channel_layout ? ctx->channel_layout : av_get_default_channel_layout( ctx->channels );
+        } while( ctx->sample_rate == 0 || (ctx->ch_layout.nb_channels == 0) || ctx->sample_fmt == AV_SAMPLE_FMT_NONE );
+        av_channel_layout_copy(&extended->ch_layout, &ctx->ch_layout);
         extended->sample_rate    = ctx->sample_rate;
         extended->sample_format  = ctx->sample_fmt;
         extended->frame_length   = ctx->frame_size;
@@ -1040,9 +1043,7 @@ int initialize_decoder_configuration
     config->prefer.bits_per_sample = config->ctx->bits_per_raw_sample   > 0 ? config->ctx->bits_per_raw_sample
                                    : config->ctx->bits_per_coded_sample > 0 ? config->ctx->bits_per_coded_sample
                                    : av_get_bytes_per_sample( config->ctx->sample_fmt ) << 3;
-    config->prefer.channel_layout  = config->ctx->channel_layout
-                                   ? config->ctx->channel_layout
-                                   : av_get_default_channel_layout( config->ctx->channels );
+    av_channel_layout_copy(&config->prefer.ch_layout, &config->ctx->ch_layout);
     if( config->count <= 1 )
         return config->error ? -1 : 0;
     /* Investigate other decoder configurations and pick preferred settings from them. */
@@ -1072,9 +1073,8 @@ int initialize_decoder_configuration
                 config->prefer.width = config->ctx->width;
             if( config->ctx->height > config->prefer.height )
                 config->prefer.height = config->ctx->height;
-            if( av_get_channel_layout_nb_channels( config->ctx->channel_layout )
-              > av_get_channel_layout_nb_channels( config->prefer.channel_layout ) )
-                config->prefer.channel_layout = config->ctx->channel_layout;
+            if( config->ctx->ch_layout.nb_channels > config->prefer.ch_layout.nb_channels )
+                av_channel_layout_copy(&config->prefer.ch_layout, &config->ctx->ch_layout);
             if( config->ctx->sample_rate > config->prefer.sample_rate )
                 config->prefer.sample_rate = config->ctx->sample_rate;
             switch( config->prefer.sample_format )

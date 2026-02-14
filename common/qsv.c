@@ -30,6 +30,7 @@ extern "C"
 #endif  /* __cplusplus */
 #include <libavcodec/avcodec.h>
 #include <libavutil/mem.h>
+#include <libavcodec/bsf.h>
 #ifdef __cplusplus
 }
 #endif  /* __cplusplus */
@@ -41,10 +42,14 @@ int is_qsv_decoder
     const AVCodec *codec
 )
 {
-    if( codec && codec->pix_fmts )
-        for( const enum AVPixelFormat *pix_fmt = codec->pix_fmts; *pix_fmt != AV_PIX_FMT_NONE; pix_fmt++ )
-            if( *pix_fmt == AV_PIX_FMT_QSV )
-                return 1;
+    if (!codec)
+        return 0;
+    int i = 0;
+    const AVCodecHWConfig *config;
+    while ((config = avcodec_get_hw_config(codec, i++))) {
+        if (config->pix_fmt == AV_PIX_FMT_QSV)
+            return 1;
+    }
     return 0;
 }
 
@@ -63,7 +68,7 @@ int do_qsv_decoder_workaround
     static const uint8_t fake_idr[] = { 0x00, 0x00, 0x00, 0x01, 0x65 }; /* valid for both start-code and size-field prefixes */
     int ret = -1;
     AVPacket initializer;
-    av_init_packet( &initializer );
+    memset(&initializer, 0, sizeof(initializer));
     if( ctx->extradata[0] == 1 )
     {
         /* Set up the bitstream filter. */
